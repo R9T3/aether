@@ -1,4 +1,4 @@
-# aether/aether.py — Lightweight AI-Native Sandbox Wrapper for Agent Zero
+# aether/aether.py — Lightweight AI-Native Sandbox for Agent Zero (Podman on Windows)
 import asyncio
 import json
 import subprocess
@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Any, Dict, Optional
 
 class Sandbox:
-    """Simple, reliable sandbox for Agent Zero on Windows (uses Docker Desktop by default)."""
+    """Simple sandbox wrapper using Podman (daemonless-friendly) on Windows."""
 
     def __init__(
         self,
@@ -23,24 +23,23 @@ class Sandbox:
         self._proc = None
 
     async def __aenter__(self):
-        # Uses docker on Windows (Docker Desktop). Swap to "podman" if preferred.
         cmd = [
-            "docker", "run", "--rm", "-i", "--name", self.container_name,
-            "--read-only", "--network=bridge",
+            "podman", "run", "--rm", "-i", "--name", self.container_name,
+            "--read-only", "--network=slirp4netns",   # secure + works well on Windows
             "--cpus", self.resources.get("cpu", "2"),
             "--memory", self.resources.get("memory", "4g"),
             "-w", self.cwd,
         ]
 
-        # Apply simple policy hints
+        # Apply LLM policy hints
         if "read-only" in self.policy.lower():
             cmd.append("--read-only")
         if "no-net" in self.policy.lower():
             cmd.append("--network=none")
 
-        # Mount workspace (Windows-friendly path handling)
-        host_path = str(Path.cwd()).replace("\\", "/")
-        cmd.extend(["-v", f"{host_path}:/a0/workspace"])
+        # Windows-friendly volume mount (Podman handles /c/Users/... paths)
+        host_path = str(Path.cwd()).replace("\\", "/").replace("C:", "/c")
+        cmd.extend(["-v", f"{host_path}:/a0/workspace:z"])
 
         cmd.extend([self.image, "sh", "-c", "cat > /tmp/exec.sh && sh /tmp/exec.sh"])
 
@@ -67,7 +66,7 @@ class Sandbox:
     async def __aexit__(self, *args):
         if self._proc:
             try:
-                await asyncio.create_subprocess_exec("docker", "stop", self.container_name, check=False)
+                await asyncio.create_subprocess_exec("podman", "stop", self.container_name, check=False)
             except Exception:
                 pass
 
